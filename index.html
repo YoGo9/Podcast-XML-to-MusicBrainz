@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Podcast to MusicBrainz Importer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      background-color: #121212;
+      color: #f1f1f1;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    h1, h2 {
+      color: #ffffff;
+    }
+    input, button, textarea, select {
+      background: #1e1e1e;
+      color: #f1f1f1;
+      border: 1px solid #444;
+      padding: 6px;
+      margin: 5px 0;
+      border-radius: 4px;
+    }
+    .episode {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #444;
+      border-radius: 6px;
+    }
+    .code-block {
+      background: #1e1e1e;
+      padding: 10px;
+      border: 1px solid #333;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      margin-top: 5px;
+    }
+    .copy-btn {
+      margin-left: 10px;
+    }
+    .import-btn {
+      background: #2a623d;
+      margin-top: 10px;
+    }
+    .hidden-form {
+      display: none;
+    }
+    .file-input-container {
+      margin: 20px 0;
+      padding: 10px;
+      border: 2px dashed #444;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .file-input-container:hover {
+      border-color: #666;
+    }
+    #fileInput {
+      display: none;
+    }
+    .file-label {
+      cursor: pointer;
+      padding: 10px 15px;
+      background: #2a623d;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .version {
+      font-size: 12px;
+      color: #777;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Podcast to MusicBrainz Importer</h1>
+  <div class="version">Version 0.0.1</div>
+  
+  <div class="file-input-container">
+    <label for="fileInput" class="file-label">Choose RSS XML File</label>
+    <input type="file" id="fileInput" accept=".xml,text/xml">
+    <p id="fileName">No file selected</p>
+  </div>
+  
+  <label>Podcast Name:</label><br>
+  <input type="text" id="podcastName" placeholder="Podcast Name"><br>
+  <label>Artist Name:</label><br>
+  <input type="text" id="artistName" placeholder="Podcast Host/Author"><br>
+  
+  <label>Title Format:</label><br>
+  <select id="titleFormat">
+    <option value="date">Podcast YYYY-MM-DD, "Title"</option>
+    <option value="number">Podcast #Number, "Title"</option>
+  </select>
+  <br>
+  <div id="episodeList"></div>
+  
+  <!-- Hidden form for MusicBrainz submission -->
+  <form id="mbForm" method="post" action="https://musicbrainz.org/release/add" target="_blank" class="hidden-form">
+    <!-- Form fields will be dynamically added here -->
+  </form>
+
+  <script>
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (file) {
+        document.getElementById('fileName').textContent = file.name;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          parseRSS(e.target.result);
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    function formatDuration(secondsStr) {
+      if (secondsStr.includes(':')) return secondsStr; // already formatted
+      let seconds = parseInt(secondsStr, 10);
+      if (isNaN(seconds)) return '00:00:00';
+      const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+      const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+      const s = String(seconds % 60).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
+
+    function getDuration(item) {
+      // Try various ways to get the duration
+      let duration = item.querySelector('itunes\\:duration')?.textContent ||
+                     item.getElementsByTagName('itunes:duration')[0]?.textContent;
+      
+      // If we have a duration and it's not empty, return it
+      if (duration && duration.trim() !== '') {
+        return duration;
+      }
+      
+      // Try to get duration from enclosure tag length attribute
+      const enclosure = item.querySelector('enclosure');
+      if (enclosure) {
+        const length = enclosure.getAttribute('length');
+        if (length && !isNaN(parseInt(length))) {
+          // This is typically bytes, not duration, but we'll check anyway
+          const lengthNum = parseInt(length);
+          if (lengthNum > 0 && lengthNum < 100000) { // Reasonable duration in seconds
+            return lengthNum.toString();
+          }
+        }
+      }
+      
+      // Default fallback - approximately 30 minutes
+      return '1800'; // Default 30 minutes if no duration found
+    }
+
+    function getEnclosureUrl(item) {
+      return item.querySelector('enclosure')?.getAttribute('url') || '';
+    }
+    
+    function getArtistFromXml(xml) {
+      // Try to find author in itunes:author tag first
+      const itunesAuthor = xml.querySelector('channel > itunes\\:author')?.textContent || 
+                         xml.getElementsByTagName('itunes:author')[0]?.textContent;
+      if (itunesAuthor) return itunesAuthor;
+      
+      // Fallback to regular author tag
+      return xml.querySelector('channel > author')?.textContent || '';
+    }
+
+    // Function to extract episode number from title
+    function extractEpisodeNumber(title) {
+      // Try different regex patterns to find episode numbers
+      
+      // Pattern like "Episode 123" or "Ep 123" or "#123"
+      let match = title.match(/(?:episode|ep\.?|#)\s*(\d+)/i);
+      if (match) return match[1];
+      
+      // Pattern like "123:" at the beginning of the title
+      match = title.match(/^(\d+)[:\s]/i);
+      if (match) return match[1];
+      
+      // Pattern like "PodcastName 123:" 
+      match = title.match(/\s(\d+)[:\s]/i);
+      if (match) return match[1];
+      
+      return null;
+    }
+    
+    // Function to extract episode title without number
+    function extractEpisodeTitle(title) {
+      // Remove patterns like "Episode 123: " or "PodcastName 123: "
+      let cleanTitle = title.replace(/^.*?(\d+)[:\s]+/i, '');
+      
+      // If that didn't change anything, it might be a different format
+      if (cleanTitle === title) {
+        // Try another common format
+        cleanTitle = title.replace(/^.*?:\s+/i, '');
+      }
+      
+      return cleanTitle || title;
+    }
+
+    function parseRSS(xmlText) {
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(xmlText, 'application/xml');
+      const channelTitle = xml.querySelector('channel > title')?.textContent || '';
+      document.getElementById('podcastName').value = channelTitle;
+      
+      // Get author/artist from the XML
+      const authorName = getArtistFromXml(xml);
+      if (authorName) {
+        document.getElementById('artistName').value = authorName;
+      }
+
+      const items = xml.querySelectorAll('item');
+      const container = document.getElementById('episodeList');
+      container.innerHTML = '';
+
+      if (items.length === 0) {
+        container.innerHTML = '<p>No episodes found in the XML file. Please check the file format.</p>';
+        return;
+      }
+
+      items.forEach((item, index) => {
+        const title = item.querySelector('title')?.textContent || '';
+        const pubDate = new Date(item.querySelector('pubDate')?.textContent);
+        const dateStr = pubDate.toISOString().split('T')[0];
+        const rawDuration = getDuration(item);
+        const duration = formatDuration(rawDuration);
+        const mp3Url = getEnclosureUrl(item);
+        
+        // Try to extract episode number from title
+        const episodeNumber = extractEpisodeNumber(title);
+        
+        // Format title based on selection
+        const podcast = document.getElementById('podcastName').value;
+        
+        // Store both formats
+        const dateFormat = `${podcast} ${dateStr}, "${title}"`;
+        const numberFormat = episodeNumber ? 
+          `${podcast} #${episodeNumber}, "${extractEpisodeTitle(title)}"` : 
+          `${podcast}, "${title}"`;
+
+        const div = document.createElement('div');
+        div.className = 'episode';
+        div.innerHTML = `
+          <strong>${title}</strong><br>
+          <div class="code-block" id="title-date-${index}">${dateFormat}</div>
+          <button class="copy-btn" onclick="copyText('title-date-${index}')">Copy Date Format</button>
+          <div class="code-block" id="title-number-${index}">${numberFormat}</div>
+          <button class="copy-btn" onclick="copyText('title-number-${index}')">Copy Number Format</button>
+          <div class="code-block" id="time-${index}">${duration}</div>
+          <button class="copy-btn" onclick="copyText('time-${index}')">Copy Time</button>
+          <br>
+          <button class="import-btn" onclick="importToMusicBrainz('date', '${encodeURIComponent(dateFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}')">Import with Date Format</button>
+          <button class="import-btn" onclick="importToMusicBrainz('number', '${encodeURIComponent(numberFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}')">Import with Number Format</button>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function copyText(id) {
+      const el = document.getElementById(id);
+      navigator.clipboard.writeText(el.textContent);
+    }
+
+    function importToMusicBrainz(format, title, date, duration, mp3Url) {
+      // Get the artist name
+      const artistName = document.getElementById('artistName').value;
+      
+      // Get date components
+      const [year, month, day] = date.split('-');
+      
+      // Parse duration properly
+      let finalDuration = "30:00"; // Default to 30 minutes
+      
+      try {
+        const durationStr = decodeURIComponent(duration);
+        
+        if (durationStr.includes(':')) {
+          // Already formatted as HH:MM:SS or MM:SS
+          const parts = durationStr.split(':');
+          if (parts.length === 3) {
+            // HH:MM:SS format - convert to minutes
+            const hours = parseInt(parts[0]) || 0;
+            const minutes = parseInt(parts[1]) || 0;
+            // Ignore seconds for simplicity
+            finalDuration = `${hours * 60 + minutes}:00`;
+          } else if (parts.length === 2) {
+            // MM:SS format - use minutes only
+            const minutes = parseInt(parts[0]) || 0;
+            // Ignore seconds for simplicity
+            finalDuration = `${minutes}:00`;
+          }
+        } else {
+          // Assume it's in seconds
+          const seconds = parseInt(durationStr);
+          if (!isNaN(seconds) && seconds > 0) {
+            // Convert seconds to minutes and round
+            const minutes = Math.round(seconds / 60);
+            if (minutes > 0) {
+              finalDuration = `${minutes}:00`;
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error parsing duration:", e);
+        // Keep default of 30:00
+      }
+      
+      console.log("Final duration:", finalDuration);
+      
+      // Clear previous form fields
+      const form = document.getElementById('mbForm');
+      form.innerHTML = '';
+      
+      // Create form fields
+      const fields = {
+        // Release data
+        'name': decodeURIComponent(title),
+        
+        // Release group data
+        'type': 'Broadcast',
+        'status': 'official',
+        
+        // Release date
+        'events.0.date.year': year,
+        'events.0.date.month': month,
+        'events.0.date.day': day,
+        
+        // Artist credit
+        'artist_credit.names.0.name': artistName,
+        'artist_credit.names.0.artist.name': artistName,
+        
+        // Medium data
+        'mediums.0.format': 'Digital Media',
+        'mediums.0.track.0.name': decodeURIComponent(title),
+        'mediums.0.track.0.length': finalDuration,
+        
+        // URL relationship for MP3
+        'urls.0.url': decodeURIComponent(mp3Url),
+        'urls.0.link_type': '75', // Download for free (ID: 75)
+        
+        // Edit note
+        'edit_note': 'Beta testing a Podcast XML importer v0.0.1 by YoMo12'
+      };
+      
+      // Add all fields to the form
+      for (const name in fields) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = fields[name];
+        form.appendChild(input);
+      }
+      
+      // Submit the form
+      form.submit();
+    }
+  </script>
+</body>
+</html>
