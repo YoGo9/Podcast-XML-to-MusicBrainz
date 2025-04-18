@@ -72,11 +72,23 @@
       color: #777;
       margin-bottom: 20px;
     }
+    .github-fork-ribbon {
+      position: fixed;
+      top: 0;
+      right: 0;
+      border: 0;
+      z-index: 9999;
+    }
   </style>
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
   <div class="version">Version 0.0.1</div>
+  
+  <!-- GitHub Fork Ribbon -->
+  <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz" target="_blank">
+    <img class="github-fork-ribbon" src="https://github.blog/wp-content/uploads/2008/12/forkme_right_darkblue_121621.png?resize=149%2C149" alt="Fork me on GitHub">
+  </a>
   
   <div class="file-input-container">
     <label for="fileInput" class="file-label">Choose RSS XML File</label>
@@ -341,7 +353,7 @@
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
-        'edit_note': 'Beta testing a Podcast XML importer v0.0.1 by YoMo12'
+        'edit_note': 'Beta testing a Podcast XML importer v0.0.1 by YoMo12 - https://yogo9.github.io/Podcast-XML-to-MusicBrainz/'
       };
       
       // Add all fields to the form
