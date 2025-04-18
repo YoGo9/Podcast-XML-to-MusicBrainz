@@ -83,7 +83,7 @@
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
-  <div class="version">Version 0.0.1</div>
+  <div class="version">Version 0.0.2</div>
   
   <!-- GitHub Fork Ribbon -->
   <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz" target="_blank">
@@ -331,8 +331,10 @@
         'name': decodeURIComponent(title),
         
         // Release group data
-        'type': 'Broadcast',
+        'type.0': 'Broadcast',     // Primary type
+        'type.1': 'Spokenword',    // Secondary type
         'status': 'official',
+        'script': 'Latn',          // Set script to Latin
         
         // Release date
         'events.0.date.year': year,
@@ -353,7 +355,7 @@
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
-        'edit_note': 'Beta testing a Podcast XML importer v0.0.1 by YoMo12 - https://yogo9.github.io/Podcast-XML-to-MusicBrainz/'
+        'edit_note': 'Beta testing a Podcast XML importer v0.0.2 by YoMo12 - https://yogo9.github.io/Podcast-XML-to-MusicBrainz/'
       };
       
       // Add all fields to the form
