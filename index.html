@@ -105,6 +105,18 @@
       margin: 10px 0;
       display: none;
     }
+    .option-container {
+      margin: 10px 0;
+    }
+    .summary-preview {
+      margin-top: 10px;
+      font-size: 0.9em;
+    }
+    .summary-toggle {
+      cursor: pointer;
+      color: #2a623d;
+      text-decoration: underline;
+    }
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
@@ -113,7 +125,7 @@
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
-  <div class="version">Version 0.0.5</div>
+  <div class="version">Version 0.0.6</div>
   
   <!-- GitHub Fork Ribbon -->
   <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz/" target="_blank">
@@ -150,6 +162,11 @@
     <option value="date">Podcast YYYY-MM-DD, "Title"</option>
     <option value="number">Podcast #Number, "Title"</option>
   </select>
+  <br>
+  <div class="option-container">
+    <input type="checkbox" id="includeNotes" checked>
+    <label for="includeNotes">Include episode notes as annotation</label>
+  </div>
   <br>
   <div id="episodeList"></div>
   
@@ -304,6 +321,28 @@
       return cleanTitle || title;
     }
 
+    // Get episode summary/description from item
+    function getEpisodeSummary(item) {
+      // Try multiple places where the summary might be
+      return item.querySelector('itunes\\:summary')?.textContent || 
+             item.getElementsByTagName('itunes:summary')[0]?.textContent ||
+             item.querySelector('content\\:encoded')?.textContent ||
+             item.getElementsByTagName('content:encoded')[0]?.textContent ||
+             item.querySelector('description')?.textContent || '';
+    }
+
+    // Toggle summary visibility
+    function toggleSummary(id) {
+      const summary = document.getElementById(id);
+      if (summary.style.display === 'none') {
+        summary.style.display = 'block';
+        document.getElementById(`${id}-toggle`).textContent = 'Hide notes';
+      } else {
+        summary.style.display = 'none';
+        document.getElementById(`${id}-toggle`).textContent = 'Show notes';
+      }
+    }
+
     // Parse RSS XML and display episodes
     function parseRSS(xmlText) {
       const parser = new DOMParser();
@@ -341,6 +380,9 @@
         const duration = formatDuration(rawDuration);
         const mp3Url = getEnclosureUrl(item);
         
+        // Get the episode summary/description
+        const summary = getEpisodeSummary(item);
+        
         // Try to extract episode number from title
         const episodeNumber = extractEpisodeNumber(title);
         
@@ -355,6 +397,26 @@
 
         const div = document.createElement('div');
         div.className = 'episode';
+        
+        // Create summary preview
+        let summaryHTML = '';
+        if (summary) {
+          const previewLength = 150;
+          const summaryPreview = summary.length > previewLength ? 
+            summary.substring(0, previewLength) + '...' : 
+            summary;
+          
+          summaryHTML = `
+            <div class="summary-container">
+              <div class="summary-toggle" id="summary-${index}-toggle" onclick="toggleSummary('summary-${index}')">Show notes</div>
+              <div class="summary-preview" id="summary-${index}" style="display: none;">
+                <strong>Episode Notes:</strong>
+                <div class="code-block">${summary}</div>
+              </div>
+            </div>
+          `;
+        }
+        
         div.innerHTML = `
           <strong>${title}</strong><br>
           <div class="code-block" id="title-date-${index}">${dateFormat}</div>
@@ -363,9 +425,10 @@
           <button class="copy-btn" onclick="copyText('title-number-${index}')">Copy Number Format</button>
           <div class="code-block" id="time-${index}">${duration}</div>
           <button class="copy-btn" onclick="copyText('time-${index}')">Copy Time</button>
+          ${summaryHTML}
           <br>
-          <button class="import-btn" onclick="importToMusicBrainz('date', '${encodeURIComponent(dateFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}')">Import with Date Format</button>
-          <button class="import-btn" onclick="importToMusicBrainz('number', '${encodeURIComponent(numberFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}')">Import with Number Format</button>
+          <button class="import-btn" onclick="importToMusicBrainz('date', '${encodeURIComponent(dateFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Date Format</button>
+          <button class="import-btn" onclick="importToMusicBrainz('number', '${encodeURIComponent(numberFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Number Format</button>
         `;
         container.appendChild(div);
       });
@@ -389,9 +452,12 @@
     }
 
     // Import to MusicBrainz
-    function importToMusicBrainz(format, title, date, duration, mp3Url) {
+    function importToMusicBrainz(format, title, date, duration, mp3Url, summary) {
       // Get the artist name
       const artistName = document.getElementById('artistName').value;
+      
+      // Check if notes should be included
+      const includeNotes = document.getElementById('includeNotes').checked;
       
       // Get date components
       const [year, month, day] = date.split('-');
@@ -469,8 +535,13 @@
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
-        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.5 https://podbrainz.com/'
+        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.6 https://podbrainz.com/'
       };
+      
+      // Add annotation if checkbox is checked and summary exists
+      if (includeNotes && summary) {
+        fields['annotation'] = decodeURIComponent(summary);
+      }
       
       // Add all fields to the form
       for (const name in fields) {
