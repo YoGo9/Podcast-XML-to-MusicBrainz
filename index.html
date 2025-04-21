@@ -22,6 +22,11 @@
       margin: 5px 0;
       border-radius: 4px;
     }
+    .url-input {
+      width: 70%;
+      padding: 8px;
+      margin-right: 10px;
+    }
     .episode {
       margin-bottom: 20px;
       padding: 10px;
@@ -79,18 +84,57 @@
       border: 0;
       z-index: 9999;
     }
+    .loading {
+      display: none;
+      margin: 20px 0;
+    }
+    .loading-spinner {
+      border: 4px solid #333;
+      border-top: 4px solid #2a623d;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    .error-message {
+      background-color: #621515;
+      color: white;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+      display: none;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
-  <div class="version">Version 0.0.2</div>
+  <div class="version">Version 0.0.5</div>
   
   <!-- GitHub Fork Ribbon -->
-  <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz" target="_blank">
+  <a href="https://github.com/YourGitHubUsername/Podcast-to-MusicBrainz" target="_blank">
     <img class="github-fork-ribbon" src="https://github.blog/wp-content/uploads/2008/12/forkme_right_darkblue_121621.png?resize=149%2C149" alt="Fork me on GitHub">
   </a>
   
+  <!-- URL Input Section -->
+  <div class="url-input-container">
+    <h2>Fetch Podcast RSS Feed</h2>
+    <input type="text" id="rssUrl" class="url-input" placeholder="https://example.com/feed.xml">
+    <button onclick="fetchFeed()">Fetch</button>
+    <div class="loading" id="loadingIndicator">
+      <div class="loading-spinner"></div>
+      <p>Fetching podcast data...</p>
+    </div>
+    <div class="error-message" id="errorMessage"></div>
+  </div>
+  
+  <!-- File Input Section (as fallback) -->
   <div class="file-input-container">
+    <h2>Or Upload RSS XML File</h2>
     <label for="fileInput" class="file-label">Choose RSS XML File</label>
     <input type="file" id="fileInput" accept=".xml,text/xml">
     <p id="fileName">No file selected</p>
@@ -115,6 +159,10 @@
   </form>
 
   <script>
+    // API URL - Replace with your Vercel deployment URL when deployed
+    const API_URL = '/api/rss-proxy';
+    
+    // Initialize event listener for file input
     document.getElementById('fileInput').addEventListener('change', function(e) {
       const file = e.target.files[0];
       if (file) {
@@ -127,6 +175,48 @@
       }
     });
 
+    // Function to fetch RSS feed from URL via our API
+    async function fetchFeed() {
+      const url = document.getElementById('rssUrl').value.trim();
+      
+      if (!url) {
+        showError("Please enter a valid RSS feed URL");
+        return;
+      }
+      
+      // Show loading indicator
+      document.getElementById('loadingIndicator').style.display = 'block';
+      // Hide previous error messages
+      document.getElementById('errorMessage').style.display = 'none';
+      
+      try {
+        const response = await fetch(`${API_URL}?url=${encodeURIComponent(url)}`);
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || `Failed to fetch: ${response.status} ${response.statusText}`);
+        }
+        
+        const xmlText = await response.text();
+        parseRSS(xmlText);
+      } catch (error) {
+        showError(`Error fetching RSS feed: ${error.message}`);
+      } finally {
+        // Hide loading indicator
+        document.getElementById('loadingIndicator').style.display = 'none';
+      }
+    }
+    
+    // Function to show error messages
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+      // Hide loading indicator if it's visible
+      document.getElementById('loadingIndicator').style.display = 'none';
+    }
+
+    // Format duration from seconds to HH:MM:SS
     function formatDuration(secondsStr) {
       if (secondsStr.includes(':')) return secondsStr; // already formatted
       let seconds = parseInt(secondsStr, 10);
@@ -137,6 +227,7 @@
       return `${h}:${m}:${s}`;
     }
 
+    // Get duration from item
     function getDuration(item) {
       // Try various ways to get the duration
       let duration = item.querySelector('itunes\\:duration')?.textContent ||
@@ -164,10 +255,12 @@
       return '1800'; // Default 30 minutes if no duration found
     }
 
+    // Get enclosure URL from item
     function getEnclosureUrl(item) {
       return item.querySelector('enclosure')?.getAttribute('url') || '';
     }
     
+    // Get artist from XML
     function getArtistFromXml(xml) {
       // Try to find author in itunes:author tag first
       const itunesAuthor = xml.querySelector('channel > itunes\\:author')?.textContent || 
@@ -178,7 +271,7 @@
       return xml.querySelector('channel > author')?.textContent || '';
     }
 
-    // Function to extract episode number from title
+    // Extract episode number from title
     function extractEpisodeNumber(title) {
       // Try different regex patterns to find episode numbers
       
@@ -197,7 +290,7 @@
       return null;
     }
     
-    // Function to extract episode title without number
+    // Extract episode title without number
     function extractEpisodeTitle(title) {
       // Remove patterns like "Episode 123: " or "PodcastName 123: "
       let cleanTitle = title.replace(/^.*?(\d+)[:\s]+/i, '');
@@ -211,9 +304,17 @@
       return cleanTitle || title;
     }
 
+    // Parse RSS XML and display episodes
     function parseRSS(xmlText) {
       const parser = new DOMParser();
       const xml = parser.parseFromString(xmlText, 'application/xml');
+      
+      // Check if parsing failed or not a valid podcast feed
+      if (xml.querySelector('parsererror') || !xml.querySelector('channel')) {
+        showError("Failed to parse RSS feed. Please check if the URL points to a valid podcast RSS feed.");
+        return;
+      }
+      
       const channelTitle = xml.querySelector('channel > title')?.textContent || '';
       document.getElementById('podcastName').value = channelTitle;
       
@@ -228,7 +329,7 @@
       container.innerHTML = '';
 
       if (items.length === 0) {
-        container.innerHTML = '<p>No episodes found in the XML file. Please check the file format.</p>';
+        container.innerHTML = '<p>No episodes found in the RSS feed. Please check if this is a valid podcast feed.</p>';
         return;
       }
 
@@ -270,11 +371,24 @@
       });
     }
 
+    // Copy text to clipboard
     function copyText(id) {
       const el = document.getElementById(id);
-      navigator.clipboard.writeText(el.textContent);
+      navigator.clipboard.writeText(el.textContent)
+        .then(() => {
+          // Optional: provide visual feedback that text was copied
+          const originalText = el.textContent;
+          el.textContent = "Copied!";
+          setTimeout(() => {
+            el.textContent = originalText;
+          }, 1000);
+        })
+        .catch(err => {
+          console.error('Failed to copy text: ', err);
+        });
     }
 
+    // Import to MusicBrainz
     function importToMusicBrainz(format, title, date, duration, mp3Url) {
       // Get the artist name
       const artistName = document.getElementById('artistName').value;
@@ -355,7 +469,7 @@
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
-        'edit_note': 'Beta testing a Podcast XML importer v0.0.2 by YoMo12 - https://yogo9.github.io/Podcast-XML-to-MusicBrainz/'
+        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.5'
       };
       
       // Add all fields to the form
