@@ -125,7 +125,7 @@
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
-  <div class="version">Version 0.0.6</div>
+  <div class="version">Version 0.0.7</div>
   
   <!-- GitHub Fork Ribbon -->
   <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz/" target="_blank">
@@ -154,8 +154,10 @@
   
   <label>Podcast Name:</label><br>
   <input type="text" id="podcastName" placeholder="Podcast Name"><br>
-  <label>Artist Name:</label><br>
-  <input type="text" id="artistName" placeholder="Podcast Host/Author"><br>
+  <label>Artist Name (or MBID):</label><br>
+  <input type="text" id="artistName" placeholder="Podcast Host/Author or MBID (36 characters)"><br>
+  <label>Label Name (or MBID):</label><br>
+  <input type="text" id="labelName" placeholder="Label Name or MBID (36 characters)"><br>
   
   <label>Title Format:</label><br>
   <select id="titleFormat">
@@ -166,6 +168,10 @@
   <div class="option-container">
     <input type="checkbox" id="includeNotes" checked>
     <label for="includeNotes">Include episode notes as annotation</label>
+  </div>
+  <div class="option-container">
+    <input type="checkbox" id="includeDefaults" checked>
+    <label for="includeDefaults">Defaults (Packaging: None, Country: XW)</label>
   </div>
   <br>
   <div id="episodeList"></div>
@@ -191,6 +197,11 @@
         reader.readAsText(file);
       }
     });
+
+    // Function to check if a string is a valid MBID (36 characters)
+    function isMBID(str) {
+      return str && str.length === 36 && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+    }
 
     // Function to fetch RSS feed from URL via our API
     async function fetchFeed() {
@@ -453,11 +464,19 @@
 
     // Import to MusicBrainz
     function importToMusicBrainz(format, title, date, duration, mp3Url, summary) {
-      // Get the artist name
-      const artistName = document.getElementById('artistName').value;
+      // Get the artist name and check if it's an MBID
+      const artistValue = document.getElementById('artistName').value;
+      const isArtistMBID = isMBID(artistValue);
+      
+      // Get the label name and check if it's an MBID
+      const labelValue = document.getElementById('labelName').value;
+      const isLabelMBID = isMBID(labelValue);
       
       // Check if notes should be included
       const includeNotes = document.getElementById('includeNotes').checked;
+      
+      // Check if defaults should be included
+      const includeDefaults = document.getElementById('includeDefaults').checked;
       
       // Get date components
       const [year, month, day] = date.split('-');
@@ -521,10 +540,6 @@
         'events.0.date.month': month,
         'events.0.date.day': day,
         
-        // Artist credit
-        'artist_credit.names.0.name': artistName,
-        'artist_credit.names.0.artist.name': artistName,
-        
         // Medium data
         'mediums.0.format': 'Digital Media',
         'mediums.0.track.0.name': decodeURIComponent(title),
@@ -535,8 +550,31 @@
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
-        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.6 https://podbrainz.com/'
+        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.7 https://podbrainz.com/'
       };
+      
+      // Add artist credit (either MBID or name)
+      if (isArtistMBID) {
+        fields['artist_credit.names.0.mbid'] = artistValue;
+      } else {
+        fields['artist_credit.names.0.name'] = artistValue;
+        fields['artist_credit.names.0.artist.name'] = artistValue;
+      }
+      
+      // Add label (either MBID or name)
+      if (labelValue) {
+        if (isLabelMBID) {
+          fields['labels.0.mbid'] = labelValue;
+        } else {
+          fields['labels.0.name'] = labelValue;
+        }
+      }
+      
+      // Add defaults if checkbox is checked
+      if (includeDefaults) {
+        fields['packaging'] = 'None';
+        fields['events.0.country'] = 'XW';
+      }
       
       // Add annotation if checkbox is checked and summary exists
       if (includeNotes && summary) {
