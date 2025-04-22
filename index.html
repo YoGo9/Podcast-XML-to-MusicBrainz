@@ -663,7 +663,7 @@
           <br>
           <button class="import-btn" onclick="importToMusicBrainz('date', '${encodeURIComponent(dateFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Date Format</button>
           <button class="import-btn" onclick="importToMusicBrainz('number', '${encodeURIComponent(numberFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Number Format</button>
-          <button class="import-btn" id="import-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'inline-block' : 'none'}" onclick="importToMusicBrainz('custom', '${encodeURIComponent(customFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Custom Format</button>
+          <button class="import-btn" id="import-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'inline-block' : 'none'}" onclick="importCustomFormat(${index})">Import with Custom Format</button>
         `;
         container.appendChild(div);
       });
@@ -820,6 +820,19 @@
       // Submit the form
       form.submit();
     }
+	
+	
+	function importCustomFormat(index) {
+  const episodeData = currentEpisodes[index];
+  const customFormat = formatCustomTitle(episodeData);
+  importToMusicBrainz('custom', 
+    encodeURIComponent(customFormat), 
+    episodeData.date, 
+    encodeURIComponent(episodeData.duration), 
+    encodeURIComponent(episodeData.mp3Url), 
+    encodeURIComponent(episodeData.summary)
+  );
+}
   </script>
 </body>
 </html>
