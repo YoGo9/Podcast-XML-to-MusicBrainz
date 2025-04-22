@@ -125,7 +125,7 @@
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
-  <div class="version">Version 0.0.7</div>
+  <div class="version">Version 0.0.8</div>
   
   <!-- GitHub Fork Ribbon -->
   <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz/" target="_blank">
@@ -160,10 +160,43 @@
   <input type="text" id="labelName" placeholder="Label Name or MBID (36 characters)"><br>
   
   <label>Title Format:</label><br>
-  <select id="titleFormat">
+  <select id="titleFormat" onchange="toggleCustomFormat()">
     <option value="date">Podcast YYYY-MM-DD, "Title"</option>
     <option value="number">Podcast #Number, "Title"</option>
+    <option value="custom">Custom Format</option>
   </select>
+  <div id="customFormatBuilder" style="display: none; margin-top: 10px; padding: 10px; border: 1px solid #444; border-radius: 6px;">
+    <h3>Build Your Custom Format</h3>
+    <div class="custom-format-row">
+      <select id="fieldSelect">
+        <option value="">Select field...</option>
+        <option value="podcast">Podcast Name</option>
+        <option value="title">Title (full)</option>
+        <option value="titleBefore">Title (before colon)</option>
+        <option value="titleAfter">Title (after colon)</option>
+        <option value="date">Date (YYYY-MM-DD)</option>
+        <option value="season">Season Number</option>
+        <option value="episode">Episode Number</option>
+      </select>
+      <input type="text" id="customText" placeholder="Custom text or separator" style="width: 200px; margin-left: 10px;">
+      <input type="checkbox" id="useQuotes" style="margin-left: 10px;">
+      <label for="useQuotes">Add quotes</label>
+      <button onclick="addToFormat()" style="margin-left: 10px;">Add</button>
+    </div>
+    <div style="margin-top: 10px;">
+      <strong>Current Format:</strong>
+      <div id="formatPreview" style="font-family: monospace; padding: 5px; background: #333; margin-top: 5px;">
+        (empty)
+      </div>
+    </div>
+    <div style="margin-top: 10px;">
+      <strong>Preview:</strong>
+      <div id="formatExample" style="font-family: monospace; padding: 5px; background: #333; margin-top: 5px;">
+        (select episode to see preview)
+      </div>
+    </div>
+    <button onclick="clearFormat()" style="margin-top: 10px;">Clear Format</button>
+  </div>
   <br>
   <div class="option-container">
     <input type="checkbox" id="includeNotes" checked>
@@ -185,6 +218,10 @@
     // API URL - Replace with your Vercel deployment URL when deployed
     const API_URL = '/api/rss-proxy';
     
+    // Custom format builder variables
+    let customFormatParts = [];
+    let currentEpisodes = [];
+
     // Initialize event listener for file input
     document.getElementById('fileInput').addEventListener('change', function(e) {
       const file = e.target.files[0];
@@ -197,6 +234,159 @@
         reader.readAsText(file);
       }
     });
+
+    // Toggle custom format builder
+    function toggleCustomFormat() {
+      const format = document.getElementById('titleFormat').value;
+      const customBuilder = document.getElementById('customFormatBuilder');
+      if (format === 'custom') {
+        customBuilder.style.display = 'block';
+        updateFormatPreview();
+        updateAllEpisodeFormats(); // Update all episode displays
+        // Show custom format UI elements
+        document.querySelectorAll('[id^="title-custom-"]').forEach(el => el.style.display = 'block');
+        document.querySelectorAll('[id^="copy-custom-"]').forEach(el => el.style.display = 'inline-block');
+        document.querySelectorAll('[id^="import-custom-"]').forEach(el => el.style.display = 'inline-block');
+      } else {
+        customBuilder.style.display = 'none';
+        // Hide custom format UI elements
+        document.querySelectorAll('[id^="title-custom-"]').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('[id^="copy-custom-"]').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('[id^="import-custom-"]').forEach(el => el.style.display = 'none');
+      }
+    }
+
+    // Add to custom format
+    function addToFormat() {
+      const fieldSelect = document.getElementById('fieldSelect');
+      const customText = document.getElementById('customText');
+      const useQuotes = document.getElementById('useQuotes').checked;
+      
+      if (fieldSelect.value || customText.value) {
+        const part = {
+          type: fieldSelect.value || 'text',
+          text: customText.value,
+          quotes: useQuotes
+        };
+        customFormatParts.push(part);
+        updateFormatPreview();
+        updateAllEpisodeFormats(); // Update all episode displays
+        
+        // Reset inputs
+        fieldSelect.value = '';
+        customText.value = '';
+        document.getElementById('useQuotes').checked = false;
+      }
+    }
+
+    // Clear custom format
+    function clearFormat() {
+      customFormatParts = [];
+      updateFormatPreview();
+      updateAllEpisodeFormats(); // Update all episode displays
+    }
+
+    // Update format preview
+    function updateFormatPreview() {
+      const preview = document.getElementById('formatPreview');
+      const exampleDiv = document.getElementById('formatExample');
+      
+      if (customFormatParts.length === 0) {
+        preview.textContent = '(empty)';
+        exampleDiv.textContent = '(select episode to see preview)';
+        return;
+      }
+      
+      let formatString = '';
+      for (const part of customFormatParts) {
+        if (part.type === 'text') {
+          formatString += part.text;
+        } else {
+          const fieldName = {
+            'podcast': 'PodcastName',
+            'title': 'Title',
+            'titleBefore': 'TitleBeforeColon',
+            'titleAfter': 'TitleAfterColon',
+            'date': 'Date',
+            'season': 'Season',
+            'episode': 'Episode'
+          }[part.type] || part.type;
+          
+          if (part.quotes) {
+            formatString += '"{' + fieldName + '}"';
+          } else {
+            formatString += '{' + fieldName + '}';
+          }
+        }
+      }
+      
+      preview.textContent = formatString;
+      
+      // Update example if we have episodes
+      if (currentEpisodes.length > 0) {
+        const firstEpisode = currentEpisodes[0];
+        const formattedTitle = formatCustomTitle(firstEpisode);
+        exampleDiv.textContent = formattedTitle;
+      }
+    }
+
+    // Update all episode formats
+    function updateAllEpisodeFormats() {
+      currentEpisodes.forEach((episode, index) => {
+        const customFormat = formatCustomTitle(episode);
+        const customDiv = document.getElementById(`title-custom-${index}`);
+        if (customDiv) {
+          customDiv.textContent = customFormat;
+        }
+      });
+    }
+
+    // Format a title using custom format
+    function formatCustomTitle(episodeData) {
+      if (customFormatParts.length === 0) return '';
+      
+      let result = '';
+      for (const part of customFormatParts) {
+        if (part.type === 'text') {
+          result += part.text;
+        } else {
+          let value = '';
+          switch (part.type) {
+            case 'podcast':
+              value = document.getElementById('podcastName').value;
+              break;
+            case 'title':
+              value = episodeData.title;
+              break;
+            case 'titleBefore':
+              value = episodeData.titleBefore;
+              break;
+            case 'titleAfter':
+              value = episodeData.titleAfter;
+              break;
+            case 'date':
+              value = episodeData.date;
+              break;
+            case 'season':
+              value = episodeData.season;
+              break;
+            case 'episode':
+              value = episodeData.episodeNumber;
+              break;
+          }
+          
+          if (value) {
+            if (part.quotes) {
+              result += '"' + value + '"';
+            } else {
+              result += value;
+            }
+          }
+        }
+      }
+      
+      return result;
+    }
 
     // Function to check if a string is a valid MBID (36 characters)
     function isMBID(str) {
@@ -377,6 +567,7 @@
       const items = xml.querySelectorAll('item');
       const container = document.getElementById('episodeList');
       container.innerHTML = '';
+      currentEpisodes = []; // Reset episodes for custom format
 
       if (items.length === 0) {
         container.innerHTML = '<p>No episodes found in the RSS feed. Please check if this is a valid podcast feed.</p>';
@@ -391,11 +582,40 @@
         const duration = formatDuration(rawDuration);
         const mp3Url = getEnclosureUrl(item);
         
+        // Get iTunes season and episode numbers
+        const season = item.querySelector('itunes\\:season')?.textContent || 
+                     item.getElementsByTagName('itunes:season')[0]?.textContent || '';
+        const episode = item.querySelector('itunes\\:episode')?.textContent || 
+                      item.getElementsByTagName('itunes:episode')[0]?.textContent || '';
+        
         // Get the episode summary/description
         const summary = getEpisodeSummary(item);
         
         // Try to extract episode number from title
-        const episodeNumber = extractEpisodeNumber(title);
+        const episodeNumber = episode || extractEpisodeNumber(title);
+        
+        // Split title at colon
+        let titleBefore = title;
+        let titleAfter = '';
+        const colonIndex = title.indexOf(':');
+        if (colonIndex !== -1) {
+          titleBefore = title.substring(0, colonIndex).trim();
+          titleAfter = title.substring(colonIndex + 1).trim();
+        }
+        
+        // Store episode data for custom format
+        const episodeData = {
+          title,
+          titleBefore,
+          titleAfter,
+          date: dateStr,
+          season,
+          episodeNumber,
+          summary,
+          duration,
+          mp3Url
+        };
+        currentEpisodes.push(episodeData);
         
         // Format title based on selection
         const podcast = document.getElementById('podcastName').value;
@@ -405,6 +625,7 @@
         const numberFormat = episodeNumber ? 
           `${podcast} #${episodeNumber}, "${extractEpisodeTitle(title)}"` : 
           `${podcast}, "${title}"`;
+        const customFormat = formatCustomTitle(episodeData);
 
         const div = document.createElement('div');
         div.className = 'episode';
@@ -434,15 +655,21 @@
           <button class="copy-btn" onclick="copyText('title-date-${index}')">Copy Date Format</button>
           <div class="code-block" id="title-number-${index}">${numberFormat}</div>
           <button class="copy-btn" onclick="copyText('title-number-${index}')">Copy Number Format</button>
+          <div class="code-block" id="title-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'block' : 'none'}">${customFormat}</div>
+          <button class="copy-btn" id="copy-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'inline-block' : 'none'}" onclick="copyText('title-custom-${index}')">Copy Custom Format</button>
           <div class="code-block" id="time-${index}">${duration}</div>
           <button class="copy-btn" onclick="copyText('time-${index}')">Copy Time</button>
           ${summaryHTML}
           <br>
           <button class="import-btn" onclick="importToMusicBrainz('date', '${encodeURIComponent(dateFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Date Format</button>
           <button class="import-btn" onclick="importToMusicBrainz('number', '${encodeURIComponent(numberFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Number Format</button>
+          <button class="import-btn" id="import-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'inline-block' : 'none'}" onclick="importToMusicBrainz('custom', '${encodeURIComponent(customFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Custom Format</button>
         `;
         container.appendChild(div);
       });
+      
+      // Update custom format preview
+      updateFormatPreview();
     }
 
     // Copy text to clipboard
@@ -550,7 +777,7 @@
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
-        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.7 https://podbrainz.com/'
+        'edit_note': 'Added via Podcast to MusicBrainz Importer v0.0.8 https://podbrainz.com/ By YoMo12'
       };
       
       // Add artist credit (either MBID or name)
