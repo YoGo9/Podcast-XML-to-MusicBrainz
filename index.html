@@ -708,42 +708,37 @@
       // Get date components
       const [year, month, day] = date.split('-');
       
-      // Parse duration properly
-      let finalDuration = "30:00"; // Default to 30 minutes
-      
-      try {
-        const durationStr = decodeURIComponent(duration);
-        
-        if (durationStr.includes(':')) {
-          // Already formatted as HH:MM:SS or MM:SS
-          const parts = durationStr.split(':');
-          if (parts.length === 3) {
-            // HH:MM:SS format - convert to minutes
-            const hours = parseInt(parts[0]) || 0;
-            const minutes = parseInt(parts[1]) || 0;
-            // Ignore seconds for simplicity
-            finalDuration = `${hours * 60 + minutes}:00`;
-          } else if (parts.length === 2) {
-            // MM:SS format - use minutes only
-            const minutes = parseInt(parts[0]) || 0;
-            // Ignore seconds for simplicity
-            finalDuration = `${minutes}:00`;
-          }
-        } else {
-          // Assume it's in seconds
-          const seconds = parseInt(durationStr);
-          if (!isNaN(seconds) && seconds > 0) {
-            // Convert seconds to minutes and round
-            const minutes = Math.round(seconds / 60);
-            if (minutes > 0) {
-              finalDuration = `${minutes}:00`;
-            }
-          }
-        }
-      } catch (e) {
-        console.error("Error parsing duration:", e);
-        // Keep default of 30:00
-      }
+   // Parse duration properly
+let finalDuration = 1800000; // Default to 30 minutes in milliseconds
+
+try {
+  const durationStr = decodeURIComponent(duration);
+  
+  if (durationStr.includes(':')) {
+    // Already formatted as HH:MM:SS or MM:SS - convert to milliseconds
+    const parts = durationStr.split(':');
+    let totalSeconds = 0;
+    
+    if (parts.length === 3) {
+      // HH:MM:SS format
+      totalSeconds = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    } else if (parts.length === 2) {
+      // MM:SS format
+      totalSeconds = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+    }
+    
+    finalDuration = totalSeconds * 1000; // Convert to milliseconds
+  } else {
+    // Assume it's in seconds
+    const seconds = parseInt(durationStr);
+    if (!isNaN(seconds) && seconds > 0) {
+      finalDuration = seconds * 1000; // Convert to milliseconds
+    }
+  }
+} catch (e) {
+  console.error("Error parsing duration:", e);
+  // Keep default of 1800000 (30 minutes in milliseconds)
+}
       
       console.log("Final duration:", finalDuration);
       
