@@ -125,7 +125,7 @@
 </head>
 <body>
   <h1>Podcast to MusicBrainz Importer</h1>
-  <div class="version">Version 0.0.8</div>
+  <div class="version">Version 0.0.9</div>
   
   <!-- GitHub Fork Ribbon -->
   <a href="https://github.com/YoGo9/Podcast-XML-to-MusicBrainz/" target="_blank">
@@ -199,7 +199,7 @@
   </div>
   <br>
   <div class="option-container">
-    <input type="checkbox" id="includeNotes" checked>
+    <input type="checkbox" id="includeNotes">
     <label for="includeNotes">Include episode notes as annotation</label>
   </div>
   <div class="option-container">
@@ -510,13 +510,25 @@
     
     // Extract episode title without number
     function extractEpisodeTitle(title) {
-      // Remove patterns like "Episode 123: " or "PodcastName 123: "
-      let cleanTitle = title.replace(/^.*?(\d+)[:\s]+/i, '');
+      // For titles like "#109 - Try Not To Laugh: The Podcast w/ Angela & Damien"
+      // We want to remove just the "#109 - " part and keep the rest
       
-      // If that didn't change anything, it might be a different format
+      // Remove "#XXX - " pattern at the start
+      let cleanTitle = title.replace(/^#\d+\s*-\s*/, '');
+      
+      // If that didn't work, try "Episode XXX: " or "Episode XXX - "
       if (cleanTitle === title) {
-        // Try another common format
-        cleanTitle = title.replace(/^.*?:\s+/i, '');
+        cleanTitle = title.replace(/^Episode\s+\d+\s*[:\-]\s*/, '');
+      }
+      
+      // If that didn't work, try "Ep XXX: " or "Ep XXX - " 
+      if (cleanTitle === title) {
+        cleanTitle = title.replace(/^Ep\.?\s+\d+\s*[:\-]\s*/, '');
+      }
+      
+      // If still nothing changed, try removing any number followed by colon/dash at start
+      if (cleanTitle === title) {
+        cleanTitle = title.replace(/^\d+\s*[:\-]\s*/, '');
       }
       
       return cleanTitle || title;
@@ -530,6 +542,13 @@
              item.querySelector('content\\:encoded')?.textContent ||
              item.getElementsByTagName('content:encoded')[0]?.textContent ||
              item.querySelector('description')?.textContent || '';
+    }
+
+    // Decode HTML entities
+    function decodeHTMLEntities(text) {
+      const textArea = document.createElement('textarea');
+      textArea.innerHTML = text;
+      return textArea.value;
     }
 
     // Toggle summary visibility
@@ -640,7 +659,7 @@
           
           summaryHTML = `
             <div class="summary-container">
-              <div class="summary-toggle" id="summary-${index}-toggle" onclick="toggleSummary('summary-${index}')">Show notes</div>
+              <div class="summary-toggle" onclick="toggleSummary('summary-${index}')">Show notes</div>
               <div class="summary-preview" id="summary-${index}" style="display: none;">
                 <strong>Episode Notes:</strong>
                 <div class="code-block">${summary}</div>
@@ -661,10 +680,52 @@
           <button class="copy-btn" onclick="copyText('time-${index}')">Copy Time</button>
           ${summaryHTML}
           <br>
-          <button class="import-btn" onclick="importToMusicBrainz('date', '${encodeURIComponent(dateFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Date Format</button>
-          <button class="import-btn" onclick="importToMusicBrainz('number', '${encodeURIComponent(numberFormat)}', '${dateStr}', '${encodeURIComponent(duration)}', '${encodeURIComponent(mp3Url)}', '${encodeURIComponent(summary)}')">Import with Number Format</button>
-          <button class="import-btn" id="import-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'inline-block' : 'none'}" onclick="importCustomFormat(${index})">Import with Custom Format</button>
+          <button class="import-btn" data-format="date" data-title="${dateFormat}" data-date="${dateStr}" data-duration="${duration}" data-url="${mp3Url}" data-index="${index}">Import with Date Format</button>
+          <button class="import-btn" data-format="number" data-title="${numberFormat}" data-date="${dateStr}" data-duration="${duration}" data-url="${mp3Url}" data-index="${index}">Import with Number Format</button>
+          <button class="import-btn" data-format="custom" data-title="${customFormat}" data-date="${dateStr}" data-duration="${duration}" data-url="${mp3Url}" data-index="${index}" id="import-custom-${index}" style="display: ${document.getElementById('titleFormat').value === 'custom' ? 'inline-block' : 'none'}">Import with Custom Format</button>
         `;
+        
+        // Add event listeners to import buttons
+        const importButtons = div.querySelectorAll('.import-btn');
+        importButtons.forEach(button => {
+          button.addEventListener('click', function() {
+            const format = this.dataset.format;
+            const date = this.dataset.date;
+            const duration = this.dataset.duration;
+            const mp3Url = this.dataset.url;
+            const episodeIndex = parseInt(this.dataset.index);
+            const episodeData = currentEpisodes[episodeIndex];
+            
+            // Generate the correct title based on format
+            let finalTitle;
+            const podcast = document.getElementById('podcastName').value;
+            
+            if (format === 'date') {
+              finalTitle = `${podcast} ${date}, "${episodeData.title}"`;
+            } else if (format === 'number') {
+              if (episodeData.episodeNumber) {
+                const cleanTitle = extractEpisodeTitle(episodeData.title);
+                finalTitle = `${podcast} #${episodeData.episodeNumber}, "${cleanTitle}"`;
+              } else {
+                finalTitle = `${podcast}, "${episodeData.title}"`;
+              }
+            } else if (format === 'custom') {
+              finalTitle = formatCustomTitle(episodeData);
+            }
+            
+            // Debug logging
+            console.log('Import clicked:', {
+              format,
+              finalTitle,
+              titleLength: finalTitle.length,
+              rawTitle: episodeData.title,
+              episodeNumber: episodeData.episodeNumber
+            });
+            
+            importToMusicBrainz(format, finalTitle, date, duration, mp3Url, episodeData.summary);
+          });
+        });
+        
         container.appendChild(div);
       });
       
@@ -708,37 +769,35 @@
       // Get date components
       const [year, month, day] = date.split('-');
       
-   // Parse duration properly
-let finalDuration = 1800000; // Default to 30 minutes in milliseconds
+      // Parse duration properly
+      let finalDuration = 1800000; // Default to 30 minutes in milliseconds
 
-try {
-  const durationStr = decodeURIComponent(duration);
-  
-  if (durationStr.includes(':')) {
-    // Already formatted as HH:MM:SS or MM:SS - convert to milliseconds
-    const parts = durationStr.split(':');
-    let totalSeconds = 0;
-    
-    if (parts.length === 3) {
-      // HH:MM:SS format
-      totalSeconds = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
-    } else if (parts.length === 2) {
-      // MM:SS format
-      totalSeconds = parseInt(parts[0]) * 60 + parseInt(parts[1]);
-    }
-    
-    finalDuration = totalSeconds * 1000; // Convert to milliseconds
-  } else {
-    // Assume it's in seconds
-    const seconds = parseInt(durationStr);
-    if (!isNaN(seconds) && seconds > 0) {
-      finalDuration = seconds * 1000; // Convert to milliseconds
-    }
-  }
-} catch (e) {
-  console.error("Error parsing duration:", e);
-  // Keep default of 1800000 (30 minutes in milliseconds)
-}
+      try {
+        if (duration.includes(':')) {
+          // Already formatted as HH:MM:SS or MM:SS - convert to milliseconds
+          const parts = duration.split(':');
+          let totalSeconds = 0;
+          
+          if (parts.length === 3) {
+            // HH:MM:SS format
+            totalSeconds = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+          } else if (parts.length === 2) {
+            // MM:SS format
+            totalSeconds = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          }
+          
+          finalDuration = totalSeconds * 1000; // Convert to milliseconds
+        } else {
+          // Assume it's in seconds
+          const seconds = parseInt(duration);
+          if (!isNaN(seconds) && seconds > 0) {
+            finalDuration = seconds * 1000; // Convert to milliseconds
+          }
+        }
+      } catch (e) {
+        console.error("Error parsing duration:", e);
+        // Keep default of 1800000 (30 minutes in milliseconds)
+      }
       
       console.log("Final duration:", finalDuration);
       
@@ -749,7 +808,7 @@ try {
       // Create form fields
       const fields = {
         // Release data
-        'name': decodeURIComponent(title),
+        'name': title,
         
         // Release group data
         'type.0': 'Broadcast',     // Primary type
@@ -764,11 +823,11 @@ try {
         
         // Medium data
         'mediums.0.format': 'Digital Media',
-        'mediums.0.track.0.name': decodeURIComponent(title),
+        'mediums.0.track.0.name': title,
         'mediums.0.track.0.length': finalDuration,
         
         // URL relationship for MP3
-        'urls.0.url': decodeURIComponent(mp3Url),
+        'urls.0.url': mp3Url,
         'urls.0.link_type': '75', // Download for free (ID: 75)
         
         // Edit note
@@ -800,7 +859,10 @@ try {
       
       // Add annotation if checkbox is checked and summary exists
       if (includeNotes && summary) {
-        fields['annotation'] = decodeURIComponent(summary);
+        // Clean and limit the summary to prevent issues
+        let cleanSummary = summary.replace(/<[^>]*>/g, '').substring(0, 1000);
+        if (summary.length > 1000) cleanSummary += '...';
+        fields['annotation'] = cleanSummary;
       }
       
       // Add all fields to the form
@@ -815,19 +877,6 @@ try {
       // Submit the form
       form.submit();
     }
-	
-	
-	function importCustomFormat(index) {
-  const episodeData = currentEpisodes[index];
-  const customFormat = formatCustomTitle(episodeData);
-  importToMusicBrainz('custom', 
-    encodeURIComponent(customFormat), 
-    episodeData.date, 
-    encodeURIComponent(episodeData.duration), 
-    encodeURIComponent(episodeData.mp3Url), 
-    encodeURIComponent(episodeData.summary)
-  );
-}
   </script>
 </body>
 </html>
